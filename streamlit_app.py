@@ -140,7 +140,7 @@ elif page == "Revenue Analysis":
     st.subheader("🗺️ Revenue by State")
     fig2, ax2 = plt.subplots(figsize=(10, 6))
     top_states = data['top_states'].head(10)
-    ax2.barh(top_states['customer_state'], top_states['revenue'])
+    ax2.barh(top_states['customer_state'], top_states['total_revenue'])
     ax2.set_xlabel('Revenue ($)')
     ax2.set_title('Top 10 States by Revenue')
     ax2.invert_yaxis()
