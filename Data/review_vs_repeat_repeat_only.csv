@@ -1,0 +1,7 @@
+review_bucket,repeat_customer_count,avg_orders_per_repeat_customer,max_orders_in_bucket
+1,129,2.07,3
+2,159,2.09,9
+3,430,2.10,5
+4,707,2.14,6
+5,1367,2.11,15
+,9,2.00,2
