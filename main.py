@@ -194,8 +194,9 @@ def main():
                     print(f"   - credit_card_rate (5%): Payment method correlates with loyalty")
                     print(f"   - late_delivery_rate (3%): Delivery issues marginally affect churn")
             
-            # Use full model for predictions
-            train_results = train_results
+            # Use behavioral model (ablation - no recency/tenure) for predictions
+            # This shows true predictive power from behavioral signals
+            train_results = train_results_ablation
             
             # Get churn predictions
             print("\nGenerating churn risk predictions...")

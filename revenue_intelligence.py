@@ -287,15 +287,35 @@ class RevenueAnalytics:
         }
     
     def _calculate_growth_rate(self) -> float:
-        """Calculate month-over-month growth rate."""
+        """Calculate month-over-month growth rate, excluding months with very low revenue."""
         if len(self.monthly_revenue) < 2:
             return 0.0
             
         revenue = self.monthly_revenue['revenue'].values
-        growth_rates = [(revenue[i] - revenue[i-1]) / revenue[i-1] * 100 
-                       for i in range(1, len(revenue)) if revenue[i-1] > 0 and revenue[i-1] is not None]
+        
+        # Filter out months with very low revenue (< $10,000) as they represent data issues
+        # and cause unrealistic growth calculations
+        MIN_REVENUE_THRESHOLD = 10000
+        
+        growth_rates = []
+        for i in range(1, len(revenue)):
+            prev_rev = revenue[i-1]
+            curr_rev = revenue[i]
+            
+            # Skip if previous month has very low revenue (data quality issues)
+            if prev_rev >= MIN_REVENUE_THRESHOLD and prev_rev is not None and not np.isnan(prev_rev):
+                rate = (curr_rev - prev_rev) / prev_rev * 100
+                growth_rates.append(rate)
+        
         if not growth_rates:
+            # Fallback: calculate from first substantial month to last month
+            valid_revenue = [(i, r) for i, r in enumerate(revenue) if r >= MIN_REVENUE_THRESHOLD]
+            if len(valid_revenue) >= 2:
+                first_idx, first_rev = valid_revenue[0]
+                last_idx, last_rev = valid_revenue[-1]
+                return (last_rev - first_rev) / first_rev * 100
             return 0.0
+        
         return np.mean(growth_rates)
     
     def get_revenue_trends(self) -> pd.DataFrame:
