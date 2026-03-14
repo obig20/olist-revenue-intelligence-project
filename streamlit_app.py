@@ -130,7 +130,7 @@ elif page == "Revenue Analysis":
     st.subheader("🏆 Top Categories by Revenue")
     fig, ax = plt.subplots(figsize=(10, 6))
     top_cat = data['top_categories'].head(10)
-    ax.barh(top_cat['product_category_name'], top_cat['revenue'])
+    ax.barh(top_cat['product_category_name_english'], top_cat['revenue'])
     ax.set_xlabel('Revenue ($)')
     ax.set_title('Top 10 Categories by Revenue')
     ax.invert_yaxis()
@@ -262,24 +262,30 @@ elif page == "Cohort Retention":
     # Display cohort data
     st.subheader("Monthly Cohort Retention")
     
-    # Pivot the cohort data for display
-    cohort_pivot = data['cohort_retention'].pivot(
-        index='cohort_month', 
-        columns='months_since_first_purchase', 
-        values='retention_rate'
-    )
+    # Filter to non-churned data and pivot for heatmap
+    cohort_data = data['cohort_retention'][data['cohort_retention']['churn_label'] == 0]
     
-    # Display as heatmap
-    fig, ax = plt.subplots(figsize=(15, 8))
-    sns.heatmap(cohort_pivot, annot=True, fmt='.0%', cmap='YlGnBu', ax=ax)
-    ax.set_title('Customer Retention by Cohort Month')
-    ax.set_xlabel('Months Since First Purchase')
-    ax.set_ylabel('Cohort Month')
-    st.pyplot(fig)
-    
-    # Average retention
-    avg_retention = data['cohort_retention']['retention_rate'].mean()
-    st.metric("Average Retention Rate", f"{avg_retention:.1%}")
+    if len(cohort_data) > 0:
+        # Pivot the cohort data for display
+        cohort_pivot = cohort_data.pivot(
+            index='cohort_month', 
+            columns='month_offset', 
+            values='retention_rate_pct'
+        )
+        
+        # Display as heatmap
+        fig, ax = plt.subplots(figsize=(15, 8))
+        sns.heatmap(cohort_pivot, annot=True, fmt='.0%', cmap='YlGnBu', ax=ax)
+        ax.set_title('Customer Retention by Cohort Month')
+        ax.set_xlabel('Months Since First Purchase')
+        ax.set_ylabel('Cohort Month')
+        st.pyplot(fig)
+        
+        # Average retention
+        avg_retention = cohort_data['retention_rate_pct'].mean()
+        st.metric("Average Retention Rate", f"{avg_retention:.1f}%")
+    else:
+        st.warning("No cohort retention data available.")
 
 # Footer
 st.markdown("---")
