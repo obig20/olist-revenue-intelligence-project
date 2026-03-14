@@ -287,36 +287,35 @@ class RevenueAnalytics:
         }
     
     def _calculate_growth_rate(self) -> float:
-        """Calculate month-over-month growth rate, excluding months with very low revenue."""
+        """Calculate growth rate using CAGR formula for more realistic metrics."""
         if len(self.monthly_revenue) < 2:
             return 0.0
             
         revenue = self.monthly_revenue['revenue'].values
         
         # Filter out months with very low revenue (< $10,000) as they represent data issues
-        # and cause unrealistic growth calculations
         MIN_REVENUE_THRESHOLD = 10000
         
-        growth_rates = []
-        for i in range(1, len(revenue)):
-            prev_rev = revenue[i-1]
-            curr_rev = revenue[i]
-            
-            # Skip if previous month has very low revenue (data quality issues)
-            if prev_rev >= MIN_REVENUE_THRESHOLD and prev_rev is not None and not np.isnan(prev_rev):
-                rate = (curr_rev - prev_rev) / prev_rev * 100
-                growth_rates.append(rate)
+        # Find months with substantial revenue
+        valid_indices = [i for i, r in enumerate(revenue) if r >= MIN_REVENUE_THRESHOLD]
         
-        if not growth_rates:
-            # Fallback: calculate from first substantial month to last month
-            valid_revenue = [(i, r) for i, r in enumerate(revenue) if r >= MIN_REVENUE_THRESHOLD]
-            if len(valid_revenue) >= 2:
-                first_idx, first_rev = valid_revenue[0]
-                last_idx, last_rev = valid_revenue[-1]
-                return (last_rev - first_rev) / first_rev * 100
+        if len(valid_indices) < 2:
             return 0.0
         
-        return np.mean(growth_rates)
+        first_idx = valid_indices[0]
+        last_idx = valid_indices[-1]
+        
+        first_value = revenue[first_idx]
+        last_value = revenue[last_idx]
+        periods = last_idx - first_idx
+        
+        if periods <= 0 or first_value <= 0:
+            return 0.0
+        
+        # Calculate CAGR: ((End Value / Start Value) ^ (1/n)) - 1
+        cagr = ((last_value / first_value) ** (1 / periods) - 1) * 100
+        
+        return round(cagr, 2)
     
     def get_revenue_trends(self) -> pd.DataFrame:
         """Get revenue trends with moving averages."""

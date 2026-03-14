@@ -29,12 +29,9 @@ def main():
     # Initialize dashboard with data path
     dashboard = RevenueIntelligenceDashboard(data_path="Data/")
     
-    # Run full analysis
+    # Run full analysis (includes executive summary)
     print("\nRunning complete revenue analysis...")
     results = dashboard.run_full_analysis()
-    
-    # Generate executive summary
-    dashboard.generate_executive_summary()
     
     # ==========================================================================
     # PART 2: Run ML Predictions
@@ -223,8 +220,69 @@ def main():
             print("   This is expected if the data doesn't meet model requirements.")
     
     # ==========================================================================
-    # PART 3: Model Status
+    # PART 4: Revenue Impact Simulator
     # ==========================================================================
+    print("\n\n" + "=" * 70)
+    print("REVENUE IMPACT SIMULATOR")
+    print("=" * 70)
+    
+    # Calculate current metrics for simulation
+    try:
+        churn_df = pd.read_csv('Data/customer_churn.csv')
+        
+        # Calculate metrics
+        total_customers = len(churn_df)
+        churned_customers = int(churn_df['churn_label'].sum())
+        avg_revenue_per_customer = churn_df['monetary'].mean()
+        
+        # Revenue at risk
+        revenue_at_risk = churned_customers * avg_revenue_per_customer
+        
+        print(f"\n   Current Metrics:")
+        print(f"   - Total Customers: {total_customers:,}")
+        print(f"   - Churned Customers: {churned_customers:,} ({churned_customers/total_customers*100:.1f}%)")
+        print(f"   - Avg Revenue/Customer: ${avg_revenue_per_customer:,.2f}")
+        print(f"   - Revenue at Risk: ${revenue_at_risk:,.2f}")
+        
+        print(f"\n   === Scenario Analysis ===")
+        
+        # Different churn reduction scenarios
+        scenarios = [
+            ("Conservative (5% churn reduction)", 0.05),
+            ("Moderate (10% churn reduction)", 0.10),
+            ("Aggressive (20% churn reduction)", 0.20),
+            ("Targeted (30% churn reduction)", 0.30)
+        ]
+        
+        for scenario_name, churn_reduction in scenarios:
+            customers_retained = int(churned_customers * churn_reduction)
+            revenue_recovered = customers_retained * avg_revenue_per_customer
+            
+            print(f"\n   {scenario_name}:")
+            print(f"      - Customers Retained: {customers_retained:,}")
+            print(f"      - Revenue Recovered: ${revenue_recovered:,.2f}")
+        
+        # ROI assumptions (cost per retained customer)
+        cost_per_customer = 25  # Assume $25 to retain a customer
+        
+        print(f"\n   === ROI Analysis (Assuming $25/customer retention cost) ===")
+        
+        for scenario_name, churn_reduction in scenarios:
+            customers_retained = int(churned_customers * churn_reduction)
+            revenue_recovered = customers_retained * avg_revenue_per_customer
+            cost = customers_retained * cost_per_customer
+            roi = (revenue_recovered - cost) / cost * 100 if cost > 0 else 0
+            
+            print(f"\n   {scenario_name}:")
+            print(f"      - Investment: ${cost:,.2f}")
+            print(f"      - Return: ${revenue_recovered:,.2f}")
+            print(f"      - ROI: {roi:.0f}%")
+            
+        print("\n" + "=" * 70)
+        
+    except Exception as e:
+        print(f"   Skipping Revenue Simulator: {e}")
+        print("\n" + "=" * 70)
     print("\n\n" + "=" * 70)
     print("MODEL STATUS")
     print("=" * 70)

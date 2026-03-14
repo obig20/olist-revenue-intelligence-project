@@ -4,6 +4,18 @@ A comprehensive revenue analytics and machine learning platform that processes c
 
 ## Overview
 
+The Olist Revenue Intelligence System is a complete e-commerce analytics platform combining:
+- **Revenue Analysis**: Monthly revenue trends, product category performance, geographic analysis
+- **Customer Segmentation**: RFM (Recency, Frequency, Monetary) analysis for customer behavioral segmentation
+- **Churn Prediction**: Realistic ML models using behavioral features only (excluding definitional leakage)
+- **Cohort Analysis**: Customer retention and lifetime value tracking
+- **Sales Forecasting**: Predictive models for future revenue forecasting
+- **Revenue Impact Simulator**: Scenario-based ROI analysis for retention campaigns
+
+This project demonstrates rigorous ML methodology with proper temporal awareness, class imbalance handling, and ablation studies to show true predictive power.
+
+## Overview
+
 The Revenue Intelligence System is designed to analyze e-commerce data from Olist (Brazilian e-commerce platform) to provide:
 
 - **Revenue Analytics**: Monthly revenue trends, product category performance, geographic analysis
