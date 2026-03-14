@@ -15,14 +15,16 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 
 # Scikit-learn imports
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    mean_absolute_error, mean_squared_error, r2_score
+    mean_absolute_error, mean_squared_error, r2_score,
+    roc_auc_score, average_precision_score, confusion_matrix
 )
+from sklearn.utils.class_weight import compute_class_weight
 
 
 class PredictiveModeler:
@@ -62,15 +64,17 @@ class PredictiveModeler:
         self.forecast_metrics = {}
         self.clv_metrics = {}
     
-    # =========================================================================
     # CHURN PREDICTION MODEL
-    # =========================================================================
+    
     
     def train_churn_model(
         self, 
         customer_data: Optional[pd.DataFrame] = None,
         target_col: str = 'churn_label',
-        test_size: float = 0.2
+        test_size: float = 0.2,
+        use_time_split: bool = False,
+        handle_imbalance: bool = True,
+        exclude_recency: bool = False
     ) -> Dict:
         """
         Train a churn prediction model using customer features.
@@ -87,6 +91,8 @@ class PredictiveModeler:
                           If None, uses self.data['cohort_retention'] if available.
             target_col: Name of the target column (churn_label)
             test_size: Proportion of data for testing
+            use_time_split: If True, use time-based split (sort by recency)
+            handle_imbalance: If True, use class weights to handle imbalance
             
         Returns:
             Dict with training metrics and model performance
@@ -99,13 +105,35 @@ class PredictiveModeler:
                 customer_data = self.data['customer_rfm']
             else:
                 raise ValueError("No customer data available. Provide customer_data or set data in constructor.")
-        required_features = [
-            'recency_days', 'frequency', 'monetary', 
-            'avg_review_score', 'late_delivery_rate'
-        ]
+        
+        # Check for new features from churn data (includes tenure, payment behavior)
+        # If available, use expanded feature set
+        if 'tenure_days' in customer_data.columns:
+            required_features = [
+                'recency_days', 'frequency', 'monetary', 'tenure_days',
+                'avg_review_score', 'late_delivery_rate',
+                'credit_card_rate', 'avg_installments'
+            ]
+        else:
+            required_features = [
+                'recency_days', 'frequency', 'monetary', 
+                'avg_review_score', 'late_delivery_rate'
+            ]
+        
+        # Option to exclude recency (for ablation study - proves predictive power without definitional leakage)
+        # Recency directly correlates with 180-day churn definition, so excluding it shows true predictive value
+        # Also exclude tenure_days as it's highly correlated with recency
+        
+        # Filter to available features
+        available_features = [f for f in required_features if f in customer_data.columns]
+        
+        # Exclude time-based features for ablation study (both are highly correlated with 180-day churn)
+        if exclude_recency:
+            features_to_exclude = ['recency_days', 'tenure_days']
+            available_features = [f for f in available_features if f not in features_to_exclude]
         
         # Validate required columns
-        missing_cols = [col for col in required_features if col not in customer_data.columns]
+        missing_cols = [col for col in available_features if col not in customer_data.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
         
@@ -113,21 +141,46 @@ class PredictiveModeler:
             raise ValueError(f"Target column '{target_col}' not found in data")
         
         # Prepare features and target
-        X = customer_data[required_features].copy()
+        X = customer_data[available_features].copy()
         y = customer_data[target_col].copy()
         
         # Handle missing values
         X = X.fillna(X.median())
         y = y.fillna(0)
         
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
+        # Calculate class distribution for reporting
+        class_dist = y.value_counts(normalize=True)
         
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=test_size, random_state=self.random_state, 
-            stratify=y if len(y.unique()) > 1 else None
-        )
+        # Time-based split if requested (sort by recency to simulate temporal ordering)
+        if use_time_split and 'recency_days' in customer_data.columns:
+            # Sort by recency (most recent first for time-based split)
+            # For time-based: earlier recency = older customers = train, higher recency = newer = test
+            sorted_idx = customer_data['recency_days'].sort_values().index
+            X = X.loc[sorted_idx]
+            y = y.loc[sorted_idx]
+            
+            split_idx = int(len(X) * (1 - test_size))
+            X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+            y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+            split_method = 'time-based (recency)'
+        else:
+            # Standard random split with stratification
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=self.random_state, 
+                stratify=y if len(y.unique()) > 1 else None
+            )
+            split_method = 'random stratified'
+        
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        # Calculate class weights if requested
+        class_weight = None
+        if handle_imbalance and len(y.unique()) > 1:
+            classes = np.unique(y_train)
+            class_weights = compute_class_weight('balanced', classes=classes, y=y_train)
+            class_weight = dict(zip(classes, class_weights))
         
         # Train Random Forest model
         self.churn_model = RandomForestClassifier(
@@ -135,31 +188,73 @@ class PredictiveModeler:
             max_depth=10,
             min_samples_split=5,
             min_samples_leaf=2,
+            class_weight=class_weight,  # Handle class imbalance
             random_state=self.random_state,
             n_jobs=-1
         )
         
-        self.churn_model.fit(X_train, y_train)
+        self.churn_model.fit(X_train_scaled, y_train)
         
         # Predictions
-        y_pred = self.churn_model.predict(X_test)
-        y_pred_proba = self.churn_model.predict_proba(X_test)[:, 1] if len(self.churn_model.classes_) > 1 else None
+        y_pred = self.churn_model.predict(X_test_scaled)
+        y_pred_proba = None
+        if len(self.churn_model.classes_) > 1:
+            try:
+                y_pred_proba = self.churn_model.predict_proba(X_test_scaled)[:, 1]
+            except:
+                pass
         
-        # Calculate metrics
-        self.churn_metrics = {
-            'accuracy': accuracy_score(y_test, y_pred) if len(y.unique()) > 1 else 1.0,
-            'precision': precision_score(y_test, y_pred, zero_division=0) if len(y.unique()) > 1 else 1.0,
-            'recall': recall_score(y_test, y_pred, zero_division=0) if len(y.unique()) > 1 else 1.0,
-            'f1_score': f1_score(y_test, y_pred, zero_division=0) if len(y.unique()) > 1 else 1.0,
-            'features': required_features,
-            'feature_importances': dict(zip(required_features, self.churn_model.feature_importances_))
-        }
-        
-        # Cross-validation
+        # Calculate comprehensive metrics
         if len(y.unique()) > 1:
-            cv_scores = cross_val_score(self.churn_model, X_scaled, y, cv=5, scoring='f1')
-            self.churn_metrics['cv_f1_mean'] = cv_scores.mean()
-            self.churn_metrics['cv_f1_std'] = cv_scores.std()
+            metrics_dict = {
+                'accuracy': accuracy_score(y_test, y_pred),
+                'precision': precision_score(y_test, y_pred, zero_division=0),
+                'recall': recall_score(y_test, y_pred, zero_division=0),
+                'f1_score': f1_score(y_test, y_pred, zero_division=0),
+                'train_samples': len(X_train),
+                'test_samples': len(X_test),
+                'split_method': split_method,
+                'class_distribution': class_dist.to_dict(),
+                'handle_imbalance': handle_imbalance,
+                'features': available_features,
+                'feature_importances': dict(zip(available_features, self.churn_model.feature_importances_))
+            }
+            
+            # Add AUC metrics if probabilities available and both classes present
+            if y_pred_proba is not None and len(np.unique(y_test)) > 1:
+                try:
+                    metrics_dict['roc_auc'] = roc_auc_score(y_test, y_pred_proba)
+                    metrics_dict['pr_auc'] = average_precision_score(y_test, y_pred_proba)
+                except:
+                    pass
+            
+            # Add confusion matrix only if both classes in test set
+            if len(np.unique(y_test)) > 1:
+                try:
+                    cm = confusion_matrix(y_test, y_pred)
+                    metrics_dict['confusion_matrix'] = {
+                        'tn': int(cm[0, 0]),
+                        'fp': int(cm[0, 1]),
+                        'fn': int(cm[1, 0]),
+                        'tp': int(cm[1, 1])
+                    }
+                except:
+                    pass
+            
+            # Cross-validation with F1
+            X_all_scaled = self.scaler.fit_transform(X)
+            cv_scores = cross_val_score(self.churn_model, X_all_scaled, y, cv=5, scoring='f1')
+            metrics_dict['cv_f1_mean'] = cv_scores.mean()
+            metrics_dict['cv_f1_std'] = cv_scores.std()
+            
+            self.churn_metrics = metrics_dict
+        else:
+            self.churn_metrics = {
+                'accuracy': 1.0,
+                'features': available_features,
+                'train_samples': len(X_train),
+                'test_samples': len(X_test)
+            }
         
         self.is_churn_trained = True
         
@@ -213,22 +308,50 @@ class PredictiveModeler:
         if not self.is_churn_trained:
             raise RuntimeError("Churn model not trained. Call train_churn_model() first.")
         
-        required_features = [
-            'recency_days', 'frequency', 'monetary', 
-            'avg_review_score', 'late_delivery_rate'
-        ]
+        # Get features that were used in training - use exact features from training
+        if hasattr(self, 'churn_metrics') and 'features' in self.churn_metrics:
+            available_features = self.churn_metrics['features']
+        elif 'tenure_days' in customer_data.columns:
+            available_features = [
+                'recency_days', 'frequency', 'monetary', 'tenure_days',
+                'avg_review_score', 'late_delivery_rate',
+                'credit_card_rate', 'avg_installments'
+            ]
+        else:
+            available_features = [
+                'recency_days', 'frequency', 'monetary', 
+                'avg_review_score', 'late_delivery_rate'
+            ]
         
-        X = customer_data[required_features].copy()
+        # Filter to features that exist in the data
+        available_features = [f for f in available_features if f in customer_data.columns]
+        
+        # Get customer ID column (try different names)
+        id_col = None
+        for col in ['customer_unique_id', 'customer_id']:
+            if col in customer_data.columns:
+                id_col = col
+                break
+        
+        X = customer_data[available_features].copy()
         X = X.fillna(X.median())
         X_scaled = self.scaler.transform(X)
         
         probabilities = self.churn_model.predict_proba(X_scaled)
         
         # Get probability of positive class (churn)
-        churn_class_idx = list(self.churn_model.classes_).index(1) if 1 in self.churn_model.classes_ else 0
-        churn_prob = probabilities[:, churn_class_idx]
+        # Handle case where model predicts only one class
+        if len(self.churn_model.classes_) > 1:
+            churn_class_idx = list(self.churn_model.classes_).index(1) if 1 in self.churn_model.classes_ else 0
+            churn_prob = probabilities[:, churn_class_idx]
+        else:
+            # Only one class in model - assign 0.5 probability
+            churn_prob = np.full(len(customer_data), 0.5)
         
-        result = customer_data[['customer_id']].copy() if 'customer_id' in customer_data.columns else pd.DataFrame()
+        if id_col:
+            result = customer_data[[id_col]].copy()
+        else:
+            result = pd.DataFrame(index=customer_data.index)
         result['churn_probability'] = churn_prob
         
         # Add risk level categorization
