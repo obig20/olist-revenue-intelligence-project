@@ -11,6 +11,35 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from datetime import datetime
+import os
+import re
+import uuid
+
+# Security: Path traversal prevention function
+def sanitize_filename(filename: str) -> str:
+    """
+    Sanitize filename to prevent path traversal attacks.
+    
+    This function:
+    - Extracts only the base filename using os.path.basename()
+    - Filters to only allow safe alphanumeric characters, underscores, hyphens, and dots
+    - Rejects any input that attempts directory traversal after basename extraction
+    """
+    # Get only the base filename (removes any directory path components)
+    basename = os.path.basename(filename)
+    
+    # Security check: if the input had directory separators that survived basename(),
+    # it might be an attempt to bypass sanitization
+    if basename != filename and not filename.startswith(basename):
+        # Path traversal attempt detected - use safe default
+        return "report"
+    
+    # Only allow alphanumeric characters, underscores, hyphens, dots
+    safe_basename = re.sub(r'[^\w\-.]', '', basename)
+    
+    # Ensure we have a valid filename
+    return safe_basename if safe_basename else "report"
 
 # Set page config
 st.set_page_config(
@@ -290,3 +319,92 @@ elif page == "Cohort Retention":
 # Footer
 st.markdown("---")
 st.markdown("*Revenue Intelligence System - Olist E-commerce Data*")
+
+# ==================== REPORT EXPORT ====================
+st.markdown("---")
+st.header("📥 Export Reports")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Excel Report")
+    if st.button("Generate Excel Report", key="excel_btn"):
+        try:
+            from report_exporter import generate_excel_report
+            # Generate sanitized filename first to prevent path traversal
+            base_filename = f"revenue_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.xlsx"
+            safe_filename = sanitize_filename(base_filename)
+            with st.spinner("Generating Excel report..."):
+                filename = generate_excel_report(safe_filename)
+            st.success(f"✅ Report saved: {filename}")
+            # Provide download button - use sanitized filename
+            with open(filename, "rb") as f:
+                st.download_button(
+                    label="📥 Download Excel Report",
+                    data=f,
+                    file_name=safe_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        except ImportError as e:
+            st.warning(f"Install dependencies: pip install openpyxl xlsxwriter")
+        except FileNotFoundError as e:
+            st.error(f"Data file missing: {e}")
+        except PermissionError as e:
+            st.error(f"Permission denied writing file: {e}")
+        except Exception as e:
+            st.error(f"Error generating Excel report: {type(e).__name__}: {e}")
+
+with col2:
+    st.subheader("PDF Report")
+    if st.button("Generate PDF Report", key="pdf_btn"):
+        try:
+            from report_exporter import generate_pdf_report
+            # Generate sanitized filename first to prevent path traversal
+            base_filename = f"revenue_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.pdf"
+            safe_filename = sanitize_filename(base_filename)
+            with st.spinner("Generating PDF report..."):
+                filename = generate_pdf_report(safe_filename)
+            st.success(f"✅ Report saved: {filename}")
+            # Provide download button - use sanitized filename
+            with open(filename, "rb") as f:
+                st.download_button(
+                    label="📥 Download PDF Report",
+                    data=f,
+                    file_name=safe_filename,
+                    mime="application/pdf"
+                )
+        except ImportError as e:
+            st.warning(f"Install dependencies: pip install jinja2 weasyprint")
+        except FileNotFoundError as e:
+            st.error(f"Data file missing: {e}")
+        except PermissionError as e:
+            st.error(f"Permission denied writing file: {e}")
+        except Exception as e:
+            st.error(f"Error generating PDF report: {type(e).__name__}: {e}")
+
+# API Access Info
+st.markdown("---")
+st.header("🔌 API Access")
+st.markdown("""
+To access the API programmatically:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start API server
+uvicorn api_service:app --reload
+
+# Access API docs
+# http://localhost:8000/docs
+```
+
+**API Endpoints:**
+- `GET /health` - Health check
+- `GET /analytics/revenue` - Revenue analytics
+- `GET /customers` - Customer list with scores
+- `POST /customers/score` - Real-time customer scoring
+- `GET /churn/predictions` - Churn predictions
+- `POST /campaigns/generate` - Generate retention campaign
+- `GET /pricing` - API pricing tiers
+""")
